@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 Bluetooth Control</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        text-align: center;
+        margin-top: 50px;
+        background-color: #f4f4f4;
+      }
+      button {
+        padding: 15px 30px;
+        font-size: 18px;
+        margin: 20px;
+        cursor: pointer;
+        border-radius: 8px;
+        border: none;
+      }
+      .btn-connect {
+        background-color: #007bff;
+        color: white;
+      }
+      .btn-toggle {
+        background-color: #28a745;
+        color: white;
+      }
+      .btn-toggle.off {
+        background-color: #dc3545;
+      }
+      .status {
+        margin-top: 20px;
+        font-weight: bold;
+        color: #555;
+      }
+      #controls {
+        display: none;
+      } /* Hidden until connected */
+    </style>
+  </head>
+  <body>
+    <h1>ESP32 Control Panel</h1>
+
+    <button id="connectBtn" class="btn-connect">Connect to ESP32</button>
+
+    <div id="controls">
+      <p>LED Status: <span id="ledStatusText">UNKNOWN</span></p>
+      <button id="toggleBtn" class="btn-toggle">Toggle LED</button>
+    </div>
+
+    <p class="status" id="statusMsg">Disconnected</p>
+
+    <script>
+      // UUIDs must match the ESP32 code
+      const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+      const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+      let device;
+      let characteristic;
+      let isLedOn = false;
+
+      const connectBtn = document.getElementById("connectBtn");
+      const toggleBtn = document.getElementById("toggleBtn");
+      const statusMsg = document.getElementById("statusMsg");
+      const controlsDiv = document.getElementById("controls");
+      const ledStatusText = document.getElementById("ledStatusText");
+
+      connectBtn.addEventListener("click", async () => {
+        try {
+          statusMsg.textContent = "Scanning...";
+
+          // 1. Request Bluetooth Device
+          device = await navigator.bluetooth.requestDevice({
+            filters: [{ name: "ESP32 Control" }],
+            optionalServices: [serviceUUID],
+          });
+
+          statusMsg.textContent = "Connecting...";
+
+          // 2. Connect to GATT Server
+          const server = await device.gatt.connect();
+
+          // 3. Get Service
+          const service = await server.getPrimaryService(serviceUUID);
+
+          // 4. Get Characteristic
+          characteristic = await service.getCharacteristic(characteristicUUID);
+
+          // 5. Read initial state
+          const value = await characteristic.readValue();
+          const state = value.getUint8(0);
+
+          isLedOn = state === 1;
+          updateUI();
+
+          // Show controls
+          controlsDiv.style.display = "block";
+          connectBtn.style.display = "none";
+          statusMsg.textContent = "Connected";
+
+          // Handle disconnection
+          device.addEventListener("gattserverdisconnected", onDisconnected);
+        } catch (error) {
+          console.error(error);
+          statusMsg.textContent = "Connection failed: " + error;
+        }
+      });
+
+      toggleBtn.addEventListener("click", async () => {
+        if (!characteristic) return;
+
+        try {
+          // Toggle state
+          isLedOn = !isLedOn;
+
+          // Send data (1 byte)
+          const data = new Uint8Array([isLedOn ? 1 : 0]);
+          await characteristic.writeValue(data);
+
+          updateUI();
+        } catch (error) {
+          console.error(error);
+          statusMsg.textContent = "Write failed: " + error;
+        }
+      });
+
+      function updateUI() {
+        ledStatusText.textContent = isLedOn ? "ON" : "OFF";
+        if (isLedOn) {
+          toggleBtn.textContent = "Turn OFF";
+          toggleBtn.classList.remove("off");
+        } else {
+          toggleBtn.textContent = "Turn ON";
+          toggleBtn.classList.add("off");
+        }
+      }
+
+      function onDisconnected(event) {
+        statusMsg.textContent = "Disconnected";
+        controlsDiv.style.display = "none";
+        connectBtn.style.display = "inline-block";
+      }
+    </script>
+  </body>
+</html>
