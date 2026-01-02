@@ -126,18 +126,24 @@
       let isFwd = true;
 
       // --- Bluetooth Connection ---
-      document.getElementById("connectBtn").addEventListener("click", async () => {
+      connectBtn.addEventListener("click", async () => {
         try {
-          document.getElementById("statusMsg").textContent = "Scanning...";
+          statusMsg.textContent = "Scanning...";
+
+          // Change: Filter by Service UUID instead of Name
           device = await navigator.bluetooth.requestDevice({
-            filters: [{ name: "ESP32 Motor Controller" }],
-            optionalServices: [SERVICE_UUID],
+            filters: [
+              {
+                services: [SERVICE_UUID],
+              },
+            ],
           });
 
-          server = await device.gatt.connect();
-          const service = await server.getPrimaryService(SERVICE_UUID);
+          statusMsg.textContent = "Connecting...";
+          const server = await device.gatt.connect();
 
-          // Get all characteristics
+          // ... rest of your existing code ...
+          const service = await server.getPrimaryService(SERVICE_UUID);
           chars.cmd = await service.getCharacteristic(UUIDS.CMD);
           chars.dir = await service.getCharacteristic(UUIDS.DIR);
           chars.speed = await service.getCharacteristic(UUIDS.SPEED);
@@ -148,7 +154,7 @@
           document.getElementById("controls").classList.add("active");
         } catch (error) {
           console.error(error);
-          document.getElementById("statusMsg").textContent = "Error: " + error;
+          statusMsg.textContent = "Error: " + error;
         }
       });
 
