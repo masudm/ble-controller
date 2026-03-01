@@ -1,216 +1,123 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ESP32 Motor Control</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Bluetooth Control</title>
     <style>
-      body {
-        font-family: "Segoe UI", sans-serif;
-        text-align: center;
-        background-color: #222;
-        color: white;
-        user-select: none;
-      }
-
-      /* Layout */
-      .container {
-        max-width: 400px;
-        margin: 0 auto;
-        padding: 20px;
-      }
-
-      /* Throttle Button Styling */
-      #throttleBtn {
-        width: 200px;
-        height: 200px;
-        border-radius: 50%;
-        background: radial-gradient(circle, #ff4b1f, #ff9068);
-        border: 8px solid #444;
-        box-shadow: 0 0 20px rgba(255, 75, 31, 0.6);
-        cursor: pointer;
-        margin: 30px auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-        font-weight: bold;
-        transition: transform 0.1s, box-shadow 0.1s;
-      }
-      #throttleBtn:active {
-        transform: scale(0.95);
-        background: radial-gradient(circle, #d13a15, #d13a15);
-        box-shadow: 0 0 10px rgba(255, 75, 31, 0.4);
-      }
-
-      /* Sliders */
-      .slider-group {
-        margin: 20px 0;
-        text-align: left;
-        background: #333;
-        padding: 15px;
-        border-radius: 10px;
-      }
-      input[type="range"] {
-        width: 100%;
-      }
-
-      /* Direction Button */
-      .dir-btn {
-        background-color: #007bff;
-        color: white;
-        padding: 15px 40px;
-        font-size: 18px;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        margin-bottom: 20px;
-      }
-      .dir-rev {
-        background-color: #dc3545;
-      }
-
-      .status {
-        color: #aaa;
-        margin-top: 10px;
-        font-size: 12px;
-      }
-      #controls {
-        opacity: 0.3;
-        pointer-events: none;
-        transition: opacity 0.5s;
-      }
-      #controls.active {
-        opacity: 1;
-        pointer-events: all;
-      }
+        body { font-family: sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f4;}
+        button { padding: 15px 30px; font-size: 18px; margin: 20px; cursor: pointer; border-radius: 8px; border: none; }
+        .btn-connect { background-color: #007bff; color: white; }
+        .btn-toggle { background-color: #28a745; color: white; }
+        .btn-toggle.off { background-color: #dc3545; }
+        .status { margin-top: 20px; font-weight: bold; color: #555; }
+        #controls { display: none; } /* Hidden until connected */
     </style>
-  </head>
-  <body>
-    <div class="container">
-      <h1>Motor Dashboard</h1>
-      <button id="connectBtn" style="padding: 10px 20px; margin-bottom: 20px">
-        Connect Bluetooth
-      </button>
-      <div id="statusMsg" class="status">Disconnected</div>
+</head>
+<body>
 
-      <div id="controls">
-        <div id="throttleBtn">GO</div>
-
-        <button id="dirBtn" class="dir-btn">Direction: FWD</button>
-
-        <div class="slider-group">
-          <label>Top Speed: <span id="speedVal">255</span></label>
-          <input type="range" id="speedSlider" min="50" max="255" value="255" />
-        </div>
-
-        <div class="slider-group">
-          <label>Acceleration: <span id="accelVal">5</span></label>
-          <input type="range" id="accelSlider" min="1" max="20" value="5" />
-        </div>
-      </div>
+    <h1>ESP32 Control Panel</h1>
+    
+    <button id="connectBtn" class="btn-connect">Connect to ESP32</button>
+    
+    <div id="controls">
+        <p>LED Status: <span id="ledStatusText">UNKNOWN</span></p>
+        <button id="toggleBtn" class="btn-toggle">Toggle LED</button>
     </div>
 
+    <p class="status" id="statusMsg">Disconnected</p>
+
     <script>
-      // UUIDs matching ESP32
-      const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-      const UUIDS = {
-        CMD: "beb5483e-36e1-4688-b7f5-ea07361b26a8", // Run/Stop
-        DIR: "88c93215-21ec-4c07-b677-268e658c9f01", // Direction
-        SPEED: "c8c2e912-36c5-4309-8b43-9b884d521856", // Max Speed
-        ACCEL: "d483b839-e587-4322-a7f4-301149722b40", // Acceleration
-      };
+        // UUIDs must match the ESP32 code
+        const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-      let device, server;
-      let chars = {}; // Store characteristic objects here
-      let isFwd = true;
+        let device;
+        let characteristic;
+        let isLedOn = false;
 
-      // --- Bluetooth Connection ---
-      connectBtn.addEventListener("click", async () => {
-        try {
-          statusMsg.textContent = "Scanning...";
+        const connectBtn = document.getElementById('connectBtn');
+        const toggleBtn = document.getElementById('toggleBtn');
+        const statusMsg = document.getElementById('statusMsg');
+        const controlsDiv = document.getElementById('controls');
+        const ledStatusText = document.getElementById('ledStatusText');
 
-          // Change: Filter by Service UUID instead of Name
-          device = await navigator.bluetooth.requestDevice({
-            filters: [
-              {
-                services: [SERVICE_UUID],
-              },
-            ],
-          });
+        connectBtn.addEventListener('click', async () => {
+            try {
+                statusMsg.textContent = "Scanning...";
+                
+                // 1. Request Bluetooth Device
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32 Control' }],
+                    optionalServices: [serviceUUID]
+                });
 
-          statusMsg.textContent = "Connecting...";
-          const server = await device.gatt.connect();
+                statusMsg.textContent = "Connecting...";
+                
+                // 2. Connect to GATT Server
+                const server = await device.gatt.connect();
+                
+                // 3. Get Service
+                const service = await server.getPrimaryService(serviceUUID);
+                
+                // 4. Get Characteristic
+                characteristic = await service.getCharacteristic(characteristicUUID);
 
-          // ... rest of your existing code ...
-          const service = await server.getPrimaryService(SERVICE_UUID);
-          chars.cmd = await service.getCharacteristic(UUIDS.CMD);
-          chars.dir = await service.getCharacteristic(UUIDS.DIR);
-          chars.speed = await service.getCharacteristic(UUIDS.SPEED);
-          chars.accel = await service.getCharacteristic(UUIDS.ACCEL);
+                // 5. Read initial state
+                const value = await characteristic.readValue();
+                const state = value.getUint8(0);
+                
+                isLedOn = (state === 1);
+                updateUI();
 
-          document.getElementById("statusMsg").textContent = "Connected";
-          document.getElementById("connectBtn").style.display = "none";
-          document.getElementById("controls").classList.add("active");
-        } catch (error) {
-          console.error(error);
-          statusMsg.textContent = "Error: " + error;
+                // Show controls
+                controlsDiv.style.display = "block";
+                connectBtn.style.display = "none";
+                statusMsg.textContent = "Connected";
+
+                // Handle disconnection
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+            } catch (error) {
+                console.error(error);
+                statusMsg.textContent = "Connection failed: " + error;
+            }
+        });
+
+        toggleBtn.addEventListener('click', async () => {
+            if (!characteristic) return;
+
+            try {
+                // Toggle state
+                isLedOn = !isLedOn;
+                
+                // Send data (1 byte)
+                const data = new Uint8Array([isLedOn ? 1 : 0]);
+                await characteristic.writeValue(data);
+                
+                updateUI();
+            } catch (error) {
+                console.error(error);
+                statusMsg.textContent = "Write failed: " + error;
+            }
+        });
+
+        function updateUI() {
+            ledStatusText.textContent = isLedOn ? "ON" : "OFF";
+            if (isLedOn) {
+                toggleBtn.textContent = "Turn OFF";
+                toggleBtn.classList.remove('off');
+            } else {
+                toggleBtn.textContent = "Turn ON";
+                toggleBtn.classList.add('off');
+            }
         }
-      });
 
-      // --- Throttle Logic (Press to Run, Release to Stop) ---
-      const throttleBtn = document.getElementById("throttleBtn");
-
-      const startMotor = () => writeChar(chars.cmd, 1);
-      const stopMotor = () => writeChar(chars.cmd, 0);
-
-      // Mouse events
-      throttleBtn.addEventListener("mousedown", startMotor);
-      throttleBtn.addEventListener("mouseup", stopMotor);
-      throttleBtn.addEventListener("mouseleave", stopMotor);
-
-      // Touch events (for mobile)
-      throttleBtn.addEventListener("touchstart", (e) => {
-        e.preventDefault();
-        startMotor();
-      });
-      throttleBtn.addEventListener("touchend", (e) => {
-        e.preventDefault();
-        stopMotor();
-      });
-
-      // --- Direction Logic ---
-      document.getElementById("dirBtn").addEventListener("click", () => {
-        isFwd = !isFwd;
-        const btn = document.getElementById("dirBtn");
-        btn.textContent = isFwd ? "Direction: FWD" : "Direction: REV";
-        btn.classList.toggle("dir-rev", !isFwd);
-        writeChar(chars.dir, isFwd ? 1 : 0);
-      });
-
-      // --- Sliders Logic ---
-      document.getElementById("speedSlider").addEventListener("input", (e) => {
-        const val = parseInt(e.target.value);
-        document.getElementById("speedVal").textContent = val;
-        writeChar(chars.speed, val);
-      });
-
-      document.getElementById("accelSlider").addEventListener("input", (e) => {
-        const val = parseInt(e.target.value);
-        document.getElementById("accelVal").textContent = val;
-        writeChar(chars.accel, val);
-      });
-
-      // Helper to write Uint8
-      async function writeChar(characteristic, value) {
-        if (!characteristic) return;
-        try {
-          const data = new Uint8Array([value]);
-          await characteristic.writeValue(data);
-        } catch (err) {
-          console.log("Write Error: ", err);
+        function onDisconnected(event) {
+            statusMsg.textContent = "Disconnected";
+            controlsDiv.style.display = "none";
+            connectBtn.style.display = "inline-block";
         }
-      }
     </script>
-  </body>
+</body>
 </html>
